@@ -1,5 +1,5 @@
 /*! 
- * medium-editor-insert-plugin v1.0.1 - jQuery insert plugin for MediumEditor
+ * medium-editor-insert-plugin v1.0.2 - jQuery insert plugin for MediumEditor
  *
  * https://github.com/orthes/medium-editor-insert-plugin
  * 
@@ -131,11 +131,21 @@ this["MediumInsert"]["Templates"]["src/js/templates/images-toolbar.hbs"] = Handl
      */
 
     function Core (el, options) {
+        var editor;
+
         this.el = el;
         this.$el = $(el);
         this.templates = window.MediumInsert.Templates;
 
+        if (options) {
+            // Fix #142
+            // Avoid deep copying editor object, because since v2.3.0 it contains circular references which causes jQuery.extend to break
+            // Instead copy editor object to this.options manually
+            editor = options.editor;
+            options.editor = null;
+        }
         this.options = $.extend(true, {}, defaults, options);
+        this.options.editor = editor;
 
         this._defaults = defaults;
         this._name = pluginName;
@@ -452,7 +462,7 @@ this["MediumInsert"]["Templates"]["src/js/templates/images-toolbar.hbs"] = Handl
                 $p.addClass('medium-insert-active');
 
                 if (isAddon === false) {
-                    this.positionButtons($current);
+                    this.positionButtons($p);
 
                     $buttons.show();
                 }
