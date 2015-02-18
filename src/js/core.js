@@ -56,13 +56,15 @@
         this._name = pluginName;
 
         // Extend editor's functions
-        if (options && options.editor) {
-            options.editor._serialize = options.editor.serialize;
-            options.editor._deactivate = options.editor.deactivate;
-            options.editor._activate = options.editor.activate;
-            options.editor.serialize = this.editorSerialize;
-            options.editor.deactivate = this.editorDeactivate;
-            options.editor.activate = this.editorActivate;
+        if (this.options && this.options.editor) {
+            this.options.editor._serialize = this.options.editor.serialize;
+            this.options.editor._deactivate = this.options.editor.deactivate;
+            this.options.editor._activate = this.options.editor.activate;
+            this.options.editor._hideInsertButtons = this.hideButtons;
+            this.options.editor.serialize = this.editorSerialize;
+            this.options.editor.deactivate = this.editorDeactivate;
+            this.options.editor.activate = this.editorActivate;
+            this.options.editor.activatePlaceholder = this.editorActivatePlaceholder;
         }
 
         this.init();
@@ -97,8 +99,8 @@
             .on('dragover drop', function (e) {
                 e.preventDefault();
             })
-            .on('blur', $.proxy(this, 'addEditorPlaceholder'))
-            .on('keyup click', $.proxy(this, 'showButtons'))
+            .on('blur', $.proxy(this, 'activatePlaceholder'))
+            .on('keyup click', $.proxy(this, 'toggleButtons'))
             .on('selectstart mousedown', '.medium-insert, .medium-insert-buttons', $.proxy(this, 'disableSelection'))
             .on('keydown', $.proxy(this, 'fixSelectAll'))
             .on('click', '.medium-insert-buttons-show', $.proxy(this, 'toggleAddons'))
@@ -153,6 +155,38 @@
         $.each(this.elements, function (key, el) {
             $(el).data('plugin_' + pluginName).enable();
         });
+    };
+
+    /**
+     * Extend editor's activatePlaceholder function to activate placeholder dispite of the plugin buttons
+     *
+     * @return {void}
+     */
+
+    Core.prototype.editorActivatePlaceholder = function (el) {
+        var $clone = $(el).clone(),
+            cloneHtml;
+
+        $clone.find('.medium-insert-buttons').remove();
+        cloneHtml = $clone.html().replace(/^\s+|\s+$/g, '').replace(/^<p( class="medium-insert-active")?><br><\/p>$/, '');
+
+        if (!(el.querySelector('img')) &&
+            !(el.querySelector('blockquote')) &&
+            cloneHtml === '') {
+
+            el.classList.add('medium-editor-placeholder');
+            this._hideInsertButtons($(el));
+        }
+    };
+
+    /**
+     * Activate placeholder
+     *
+     * @return {void}
+     */
+
+    Core.prototype.activatePlaceholder = function () {
+        this.options.editor.activatePlaceholder(this.$el.get(0));
     };
 
     /**
@@ -228,24 +262,6 @@
     };
 
     /**
-     * Adds .medium-editor-placeholder class to the editor, when its content is empty
-     *
-     * @return {void}
-     */
-
-    Core.prototype.addEditorPlaceholder = function () {
-        var $clone = this.$el.clone(),
-            cloneHtml;
-
-        $clone.find('.medium-insert').remove();
-        cloneHtml = $clone.html().replace(/^\s+|\s+$/g, '');
-
-        if (cloneHtml === '' || cloneHtml === '<p><br></p>') {
-            this.$el.addClass('medium-editor-placeholder');
-        }
-    };
-
-    /**
      * Initialize addons
      *
      * @return {void}
@@ -274,7 +290,8 @@
      */
 
     Core.prototype.clean = function () {
-        var $buttons, $lastEl;
+        var that = this,
+            $buttons, $lastEl, $text;
 
         if (this.options.enabled === false) {
             return;
@@ -283,18 +300,26 @@
         // Fix #39
         // After deleting all content (ctrl+A and delete) in Firefox, all content is deleted and only <br> appears
         // To force placeholder to appear, set <p><br></p> as content of the $el
+
         if (this.$el.html().trim() === '' || this.$el.html().trim() === '<br>') {
             this.$el.html(this.templates['src/js/templates/core-empty-line.hbs']().trim());
         }
 
         // Fix #29
         // Wrap content text in <p></p> to avoid Firefox problems
-        this.$el
+        $text = this.$el
             .contents()
             .filter(function () {
                 return this.nodeName === '#text' && $.trim($(this).text()) !== '';
-            })
-            .wrap('<p />');
+            });
+
+        $text.each(function () {
+            $(this).wrap('<p />');
+
+            // Fix #145
+            // Move caret at the end of the element that's being wrapped
+            that.moveCaret($(this).parent(), $(this).text().length);
+        });
 
         this.addButtons();
 
@@ -339,7 +364,7 @@
      * @return {void}
      */
 
-    Core.prototype.showButtons = function (e) {
+    Core.prototype.toggleButtons = function (e) {
         var $el = $(e.target),
             selection = window.getSelection(),
             range = selection.getRangeAt(0),
@@ -357,7 +382,10 @@
             $.each(this.options.addons, function (addon) {
                 if ($el.closest('.medium-insert-'+ addon).length) {
                     $current = $el;
-                    $p = $el.closest('.medium-insert-'+ addon);
+                }
+                
+                if ($current.closest('.medium-insert-'+ addon).length) {
+                    $p = $current.closest('.medium-insert-'+ addon);
                     isAddon = true;
                     return;
                 }
@@ -380,12 +408,15 @@
     /**
      * Hides buttons
      *
+     * @param {jQuery} $el - Editor element
      * @returns {void}
      */
 
-    Core.prototype.hideButtons = function () {
-        this.$el.find('.medium-insert-buttons').hide();
-        this.$el.find('.medium-insert-buttons-addons').hide();
+    Core.prototype.hideButtons = function ($el) {
+        $el = $el || this.$el;
+
+        $el.find('.medium-insert-buttons').hide();
+        $el.find('.medium-insert-buttons-addons').hide();
     };
 
     /**
@@ -452,17 +483,26 @@
     /**
      * Move caret at the beginning of the empty paragraph
      *
-     * @param {DOM} element Element where to place the caret
+     * @param {jQuery} $el Element where to place the caret
+     * @param {integer} position Position where to move caret. Default: 0
      *
      * @return {void}
      */
 
-    Core.prototype.moveCaret = function (element) {
-        var range, sel;
+    Core.prototype.moveCaret = function ($el, position) {
+        var range, sel, el;
 
+        position = position || 0;
         range = document.createRange();
         sel = window.getSelection();
-        range.setStart(element.get(0).childNodes[0], 0);
+        el = $el.get(0);
+
+        if (!el.childNodes.length) {
+            var textEl = document.createTextNode(' ');
+            el.appendChild(textEl);
+        }
+
+        range.setStart(el.childNodes[0], position);
         range.collapse(true);
         sel.removeAllRanges();
         sel.addRange(range);
